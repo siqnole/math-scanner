@@ -1,18 +1,11 @@
 /**
- * ocr.js — Phase 6
- * Vertical math detection: "509\n+287" → "509 + 287 = 796"
- *
- * Bug fixes vs Phase 5:
- *  - Lone numbers that are the TOP of a vertical stack no longer emit a
- *    spurious "addition" bubble. We only emit an individual-line bubble when
- *    the line is NOT absorbed into a vertical group AND it contains an
- *    operator (i.e. it truly looks like a complete expression on its own).
- *  - «N OCR artefact (guillemet misread as digit prefix) stripped on input.
+ * ocr.js — Phase 6 with cancellation support
  */
 'use strict'
 
 let _math     = null
 let _nerdamer = null
+let _tesseract = null
 
 function getMath()     { if (!_math)    _math    = require('mathjs');    return _math }
 function getNerdamer() {
@@ -22,28 +15,26 @@ function getNerdamer() {
   }
   return _nerdamer
 }
+function getTesseract() {
+  if (!_tesseract) _tesseract = require('tesseract.js')
+  return _tesseract
+}
 
-// ── OCR symbol normalisation ──────────────────────────────────────────────────
+// ── OCR symbol normalisation (unchanged) ──────────────────────────────────────────────────
 const FIXES = [
   [/[×]/g,'*'],[/÷/g,'/'],[/[—–−]/g,'-'],[/\u00b2/g,'^2'],[/\u00b3/g,'^3'],
   [/\u221a/g,'sqrt'],[/\u03c0/g,'pi'],[/O(?=\d)/g,'0'],[/\s*\^\s*/g,'^'],[/==/g,'='],
-  [/\bx\b/g,'*'],        // lone 'x' between numbers → multiply
-  [/[«»‹›]/g,''],        // strip guillemet artefacts from OCR
-  // ── Quote-digit confusions (Tesseract misreads digit serifs as quotes) ──
-  // "1 → 4  (the crossbar of a 4 reads as a left-double-quote + 1)
+  [/\bx\b/g,'*'],
+  [/[«»‹›]/g,''],
   [/[\u201C\u201D\u201E\u201F\u2018\u2019\u0022\u0027]1(?=\d|$|\s)/g,'4'],
-  [/"1(?=\d|$|\s)/g,'4'],   // straight ASCII double-quote variant
-  [/'1(?=\d|$|\s)/g,'4'],   // straight single-quote variant
-  [/[^\x20-\x7E]/g,''],  // strip any remaining non-ASCII junk
+  [/"1(?=\d|$|\s)/g,'4'],
+  [/'1(?=\d|$|\s)/g,'4'],
+  [/[^\x20-\x7E]/g,''],
 ]
 function norm(s) { for (const [p,r] of FIXES) s=s.replace(p,r); return s.trim() }
 
-// ── Math patterns ─────────────────────────────────────────────────────────────
-// Note: "addition" here means a complete infix expression containing an operator.
-// A bare lone number like "509" must NOT match — it only makes sense in context
-// of a vertical stack, which is handled by detectVerticalMath().
+// ── Math patterns (unchanged) ─────────────────────────────────────────────────────────────
 const PATTERNS = [
-  // Must have at least one operator between two numbers to count as a complete expr
   { name:'arith',      re:/\d\s*[+\-\*\/]\s*\d/ },
   { name:'equation-x', re:/\d*\s*[xX]\s*[+\-\*\/\^]?[\s\d]*=\s*-?\d/ },
   { name:'trig',       re:/\b(?:sin|cos|tan|sec|csc|cot)\s*[\^(]/i },
@@ -102,7 +93,7 @@ function solve(raw) {
   catch(e) { return { type:'error', answer:`err: ${e.message.slice(0,40)}` } }
 }
 
-// ── Word → line grouping ──────────────────────────────────────────────────────
+// ── Word → line grouping (unchanged) ──────────────────────────────────────────────────────
 function groupLines(words, yThr=14) {
   if (!words.length) return []
   const sorted=[...words].sort((a,b)=>a.bbox.y0-b.bbox.y0)
@@ -115,7 +106,6 @@ function groupLines(words, yThr=14) {
   return lines.map(ws=>ws.sort((a,b)=>a.bbox.x0-b.bbox.x0))
 }
 
-// Convert grouped word-arrays into structured line objects
 function linesToRaw(groupedLines) {
   return groupedLines.map(lw => {
     const text  = lw.map(w=>w.text).join(' ')
@@ -128,16 +118,10 @@ function linesToRaw(groupedLines) {
   })
 }
 
-// ── Vertical math assembly ────────────────────────────────────────────────────
-// Detects stacked arithmetic like:
-//     509       <- bare number (first operand)
-//   +287        <- operator + second operand
-//   -----       <- optional separator line
-// and assembles into "509 + 287" for solving.
-
-const BARE_NUM  = /^\s*\d[\d,. ]*\s*$/                    // "12", "1,234"
-const OP_NUM    = /^\s*([+\-×÷*\/])\s*(\d[\d,. ]*)\s*$/  // "+287", "-37"
-const SEPARATOR = /^[\-_=\s]{2,}$|^[_=]{1,}$/             // "---", "==="
+// ── Vertical math detection (unchanged) ────────────────────────────────────────────────────
+const BARE_NUM  = /^\s*\d[\d,. ]*\s*$/
+const OP_NUM    = /^\s*([+\-×÷*\/])\s*(\d[\d,. ]*)\s*$/
+const SEPARATOR = /^[\-_=\s]{2,}$|^[_=]{1,}$/
 
 function detectVerticalMath(rawLines) {
   const assembled = []
@@ -146,8 +130,6 @@ function detectVerticalMath(rawLines) {
   for (let i = 0; i < rawLines.length; i++) {
     if (usedIdx.has(i)) continue
     const top = rawLines[i]
-
-    // First line must be a plain number
     if (!BARE_NUM.test(top.norm)) continue
 
     const topNum = top.norm.trim().replace(/[, ]/g,'')
@@ -165,7 +147,7 @@ function detectVerticalMath(rawLines) {
         parts.push({ op, num })
         j++
       } else if (SEPARATOR.test(ln.norm.trim())) {
-        j++ // skip separator line
+        j++
       } else {
         break
       }
@@ -186,100 +168,117 @@ function detectVerticalMath(rawLines) {
   return { assembled, usedIdx }
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
-async function runOcr(dataURL, opts={}) {
-  const { confidenceThreshold=55, maxBubbles=60, cropOffset={x:0,y:0}, onProgress=()=>{} } = opts
+// ── Main export with cancellation support ─────────────────────────────────────────────────
+async function runOcr(dataURL, opts = {}) {
+  const {
+    confidenceThreshold = 55,
+    maxBubbles = 60,
+    cropOffset = { x: 0, y: 0 },
+    onProgress = () => {},
+    signal,                     // new: AbortSignal for cancellation
+  } = opts;
 
-  const { createWorker } = require('tesseract.js')
+  const { createWorker } = getTesseract();
+
+  // Create worker
   const worker = await createWorker('eng', 1, {
-    logger: m => { if (m.status==='recognizing text') onProgress(Math.round(m.progress*100)) },
-    errorHandler: ()=>{},
-  })
-  await worker.setParameters({
-    tessedit_pageseg_mode: '6',
-    preserve_interword_spaces: '1',
-    // Restrict to math-relevant chars — prevents Tesseract from emitting
-    // quote characters (", ') that it confuses with digit serifs (e.g. 4 → "1)
-    tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz +-*/=^()[].,_<>%!?:',
-  })
+    logger: m => { if (m.status === 'recognizing text') onProgress(Math.round(m.progress * 100)); },
+    errorHandler: () => {},
+  });
 
-  const { data } = await worker.recognize(dataURL)
-  await worker.terminate()
-
-  const allWords      = data.words || []
-  const filteredWords = allWords.filter(w=>w.confidence>=confidenceThreshold)
-  const allRawLines   = linesToRaw(groupLines(allWords))
-
-  // ── Vertical math from unfiltered pass ────────────────────────────────────
-  const { assembled: vertMath, usedIdx: vertUsedIdx } = detectVerticalMath(allRawLines)
-
-  // ── Normal per-line processing ─────────────────────────────────────────────
-  const filteredGrouped = groupLines(filteredWords)
-  const rawLines  = []
-  const bubbles   = []
-
-  // Vertical math bubbles first (highest priority)
-  for (const vm of vertMath) {
-    const result = solve(vm.expr)
-    rawLines.push({
-      raw: vm.expr, norm: vm.expr, avgConf: 80,
-      x0: vm.x0, y0: vm.y0, x1: vm.x1,
-      pattern: 'vertical-arith',
-      vertical: true,
-    })
-    bubbles.push({
-      id:       `vert-${Date.now()}-${bubbles.length}`,
-      x:        vm.x1 + cropOffset.x + 8,
-      y:        vm.y0 + cropOffset.y,
-      equation: vm.expr,
-      answer:   result.answer,
-      type:     result.type + '-vertical',
-    })
+  // If already aborted, clean up and bail
+  if (signal?.aborted) {
+    await worker.terminate();
+    throw new Error('OCR cancelled');
   }
 
-  // Individual lines — skipped if absorbed by a vertical group.
-  // KEY FIX: also skip lone bare numbers (they only make sense as part of a
-  // vertical stack; a lone "509" is not a meaningful expression on its own).
-  for (const lw of filteredGrouped) {
-    if (bubbles.length >= maxBubbles) break
-
-    const text   = lw.map(w=>w.text).join(' ')
-    const normed = norm(text)
-    const x0     = Math.min(...lw.map(w=>w.bbox.x0))
-    const y0     = Math.min(...lw.map(w=>w.bbox.y0))
-    const x1     = Math.max(...lw.map(w=>w.bbox.x1))
-    const avgC   = Math.round(lw.reduce((s,w)=>s+w.confidence,0)/lw.length)
-
-    const absorbedByVertical = allRawLines.some(
-      (al, idx) => vertUsedIdx.has(idx) && Math.abs(al.y0 - y0) < 8
-    )
-
-    // A lone bare number with no operator is not a complete expression.
-    const isLoneNumber = BARE_NUM.test(normed)
-
-    rawLines.push({
-      raw: text, norm: normed, avgConf: avgC, x0, y0, x1,
-      pattern: matchPattern(normed) ?? null,
-      skipped: absorbedByVertical || isLoneNumber,
-    })
-
-    if (absorbedByVertical || isLoneNumber) continue
-
-    const pat = matchPattern(normed)
-    if (!pat) continue
-
-    const result = solve(normed)
-    bubbles.push({
-      id:       `${Date.now()}-${bubbles.length}`,
-      x:        x1 + cropOffset.x + 8,
-      y:        y0 + cropOffset.y,
-      equation: normed.trim(),
-      answer:   result.answer,
-      type:     result.type,
-    })
+  // Set up abort listener
+  let abortHandler = null;
+  if (signal) {
+    abortHandler = () => {
+      worker.terminate().catch(() => {});
+    };
+    signal.addEventListener('abort', abortHandler);
   }
 
-  return { bubbles, rawWords: allWords, rawLines, fullText: data.text ?? '' }
+  try {
+    const { data } = await worker.recognize(dataURL);
+
+    // After recognition, check if cancelled
+    if (signal?.aborted) throw new Error('OCR cancelled');
+
+    const allWords      = data.words || [];
+    const filteredWords = allWords.filter(w => w.confidence >= confidenceThreshold);
+    const allRawLines   = linesToRaw(groupLines(allWords));
+
+    // Vertical math
+    const { assembled: vertMath, usedIdx: vertUsedIdx } = detectVerticalMath(allRawLines);
+
+    // Normal per-line processing
+    const filteredGrouped = groupLines(filteredWords);
+    const bubbles = [];
+
+    // Vertical bubbles first
+    for (const vm of vertMath) {
+      const result = solve(vm.expr);
+      bubbles.push({
+        id:       `vert-${Date.now()}-${bubbles.length}`,
+        x:        vm.x1 + cropOffset.x + 8,
+        y:        vm.y0 + cropOffset.y,
+        equation: vm.expr,
+        answer:   result.answer,
+        type:     result.type + '-vertical',
+      });
+    }
+
+    // Individual lines
+    for (const lw of filteredGrouped) {
+      if (bubbles.length >= maxBubbles) break;
+
+      const text   = lw.map(w=>w.text).join(' ');
+      const normed = norm(text);
+      const x0     = Math.min(...lw.map(w=>w.bbox.x0));
+      const y0     = Math.min(...lw.map(w=>w.bbox.y0));
+      const x1     = Math.max(...lw.map(w=>w.bbox.x1));
+      const avgC   = Math.round(lw.reduce((s,w)=>s+w.confidence,0)/lw.length);
+
+      const absorbedByVertical = allRawLines.some(
+        (al, idx) => vertUsedIdx.has(idx) && Math.abs(al.y0 - y0) < 8
+      );
+
+      const isLoneNumber = BARE_NUM.test(normed);
+
+      if (absorbedByVertical || isLoneNumber) continue;
+
+      const pat = matchPattern(normed);
+      if (!pat) continue;
+
+      const result = solve(normed);
+      bubbles.push({
+        id:       `${Date.now()}-${bubbles.length}`,
+        x:        x1 + cropOffset.x + 8,
+        y:        y0 + cropOffset.y,
+        equation: normed.trim(),
+        answer:   result.answer,
+        type:     result.type,
+      });
+    }
+
+    return {
+      bubbles,
+      rawWords: allWords,
+      rawLines: allRawLines,
+      fullText: data.text ?? '',
+    };
+  } catch (err) {
+    // If cancellation was requested, rethrow a specific error
+    if (signal?.aborted) throw new Error('OCR cancelled');
+    throw err;
+  } finally {
+    if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+    // Ensure worker is terminated (if not already)
+    try { await worker.terminate(); } catch {}
+  }
 }
 
-module.exports = { runOcr, norm, matchPattern, solve }
+module.exports = { runOcr, norm, matchPattern, solve };

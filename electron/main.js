@@ -8,6 +8,7 @@ let overlayWin  = null
 let splashWin   = null
 let lastShot    = null
 let isCapturing = false
+let currentOcrController = null   // ← new: for cancellation
 
 // ── Fingerprint ───────────────────────────────────────────────────────────────
 let lastFingerprint = null
@@ -26,11 +27,11 @@ function log(a,m,d='') { console.log(`[${new Date().toISOString().split('T')[1].
 // ── Splash steps ──────────────────────────────────────────────────────────────
 // Keep in sync with STEPS array in splash.html
 const SPLASH_STEPS = {
-  LAUNCHING:  0,   // app ready, splash shown
-  LOADING_UI: 1,   // control + overlay windows created, loading URLs
-  OCR_INIT:   2,   // Tesseract worker spinning up
-  OCR_WARM:   3,   // Tesseract first recognition (warm-up) running
-  READY:      4,   // everything done
+  LAUNCHING:  0,
+  LOADING_UI: 1,
+  OCR_INIT:   2,
+  OCR_WARM:   3,
+  READY:      4,
 }
 
 function splashStep(index) {
@@ -55,24 +56,19 @@ function createSplashWindow() {
 
 function closeSplash() {
   if (!splashWin || splashWin.isDestroyed()) return
-  // Fade out via opacity before destroy (best effort — supported on Win/Mac)
   splashWin.setOpacity(0)
   setTimeout(() => { if (!splashWin?.isDestroyed()) splashWin.close(); splashWin = null }, 250)
 }
 
-// ── Tesseract pre-warm ────────────────────────────────────────────────────────
-// We run a tiny blank-image recognition on startup so Tesseract's WASM and
-// language data are cached before the user's first real scan.
+// ── Tesseract pre-warm (unchanged, but note the error you saw might be fixed with proper import) ──
 async function prewarmTesseract() {
   log('PREWARM', 'Starting Tesseract pre-warm')
   try {
     const { createWorker } = require('tesseract.js')
-    // Step: OCR_INIT — worker is being created, WASM loading
     splashStep(SPLASH_STEPS.OCR_INIT)
 
     const worker = await createWorker('eng', 1, {
       logger: m => {
-        // Tesseract logs "loading language traineddata", "initializing api", etc.
         if (m.status === 'loading language traineddata') splashStep(SPLASH_STEPS.OCR_INIT)
         if (m.status === 'initializing api')             splashStep(SPLASH_STEPS.OCR_WARM)
         if (m.status === 'recognizing text')             splashStep(SPLASH_STEPS.OCR_WARM)
@@ -80,9 +76,7 @@ async function prewarmTesseract() {
       errorHandler: ()=>{},
     })
 
-    // Step: OCR_WARM — do a minimal recognition to JIT-compile everything
     splashStep(SPLASH_STEPS.OCR_WARM)
-    // 1×1 white PNG: data:image/png;base64,...
     const BLANK = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=='
     await worker.recognize(BLANK)
     await worker.terminate()
@@ -154,32 +148,55 @@ async function captureScreen() {
   } finally { isCapturing=false }
 }
 
+// ── Updated OCR runner with cancellation ──────────────────────────────────────
 async function runOcrOnRegion(croppedDataURL, cropRect) {
-  sendToControl('debug-event',{event:'ocr-start',data:{},ts:Date.now()})
-  log('OCR','Starting on cropped region',cropRect)
-  sendToOverlay('scan-start', cropRect)
+  // Cancel any ongoing OCR
+  if (currentOcrController) {
+    currentOcrController.abort();
+    currentOcrController = null;
+  }
+
+  const controller = new AbortController();
+  currentOcrController = controller;
+
+  sendToControl('debug-event', { event: 'ocr-start', data: {}, ts: Date.now() });
+  log('OCR', 'Starting on cropped region', cropRect);
+  sendToOverlay('scan-start', cropRect);
+
   try {
     const { bubbles, rawWords, rawLines, fullText } = await runOcr(croppedDataURL, {
       confidenceThreshold: 40,
       maxBubbles: 60,
       cropOffset: { x: cropRect.x, y: cropRect.y },
       onProgress: pct => {
-        sendToControl('ocr-progress', pct)
-        sendToOverlay('scan-progress', { pct, cropRect })
+        sendToControl('ocr-progress', pct);
+        sendToOverlay('scan-progress', { pct, cropRect });
       },
-    })
-    log('OCR','Done',{ bubbles:bubbles.length, words:rawWords.length, lines:rawLines.length })
-    sendToControl('ocr-results', bubbles)
-    sendToControl('ocr-debug',{ rawWords, rawLines, fullText,
-      summary:{ totalWords:rawWords.length, totalLines:rawLines.length, bubblesFound:bubbles.length } })
-    sendToControl('debug-event',{event:'ocr-done',data:{count:bubbles.length},ts:Date.now()})
-    sendToOverlay('scan-done', { bubbles, cropRect })
-    if (bubbles.length>0) sendToOverlay('show-bubbles', bubbles)
-  } catch(err) {
-    log('OCR','ERR',{message:err.message})
-    sendToControl('screenshot-error',{message:err.message})
-    sendToControl('debug-event',{event:'ocr-error',data:{message:err.message},ts:Date.now()})
-    sendToOverlay('scan-done',{ bubbles:[], cropRect })
+      signal: controller.signal,
+    });
+
+    // If aborted, ignore results
+    if (controller.signal.aborted) return;
+
+    log('OCR', 'Done', { bubbles: bubbles.length, words: rawWords.length, lines: rawLines.length });
+    sendToControl('ocr-results', bubbles);
+    sendToControl('ocr-debug', { rawWords, rawLines, fullText,
+      summary: { totalWords: rawWords.length, totalLines: rawLines.length, bubblesFound: bubbles.length } });
+    sendToControl('debug-event', { event: 'ocr-done', data: { count: bubbles.length }, ts: Date.now() });
+    sendToOverlay('scan-done', { bubbles, cropRect });
+    if (bubbles.length > 0) sendToOverlay('show-bubbles', bubbles);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      log('OCR', 'Cancelled');
+      sendToControl('debug-event', { event: 'ocr-cancelled', data: {}, ts: Date.now() });
+    } else {
+      log('OCR', 'ERR', { message: err.message });
+      sendToControl('screenshot-error', { message: err.message });
+      sendToControl('debug-event', { event: 'ocr-error', data: { message: err.message }, ts: Date.now() });
+      sendToOverlay('scan-done', { bubbles: [], cropRect });
+    }
+  } finally {
+    if (currentOcrController === controller) currentOcrController = null;
   }
 }
 
@@ -191,7 +208,7 @@ function createControlWindow() {
     titleBarStyle: 'hidden',
     transparent: false,
     backgroundColor: '#0a0a0a',
-    show: false,   // ← hidden until splash finishes
+    show: false,
     webPreferences:{ preload:path.join(__dirname,'preload.js'), contextIsolation:true, nodeIntegration:false },
   })
   controlWin.on('closed',()=>{ controlWin=null; app.quit() })
@@ -213,7 +230,7 @@ function createOverlayWindow() {
   overlayWin = new BrowserWindow({
     width, height, x:0, y:0, transparent:true, frame:false,
     alwaysOnTop:true, skipTaskbar:true, focusable:false,
-    show: false,   // ← hidden until splash finishes
+    show: false,
     webPreferences:{ preload:path.join(__dirname,'preload.js'), contextIsolation:true, nodeIntegration:false },
   })
   overlayWin.setIgnoreMouseEvents(true,{forward:true})
@@ -276,31 +293,24 @@ ipcMain.handle('ping', () => ({ pong:true, ts:Date.now() }))
 // ── Boot sequence ─────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
 
-  // 1. Show splash immediately — pure HTML, zero deps, loads in <100ms
   createSplashWindow()
   splashStep(SPLASH_STEPS.LAUNCHING)
 
-  // 2. Create app windows (hidden) + start loading their URLs in parallel
   splashStep(SPLASH_STEPS.LOADING_UI)
   createControlWindow()
   createOverlayWindow()
 
-  // Load both windows concurrently
   const uiReady = Promise.all([
     loadWithRetry(controlWin, 'control'),
     loadWithRetry(overlayWin, 'overlay'),
   ])
 
-  // 3. Pre-warm Tesseract while UI loads — both run in parallel
-  //    prewarmTesseract() advances splash through OCR_INIT → OCR_WARM itself
   const warmReady = prewarmTesseract()
 
-  // 4. Wait for both to finish
   await Promise.all([uiReady, warmReady])
 
-  // 5. Everything ready — show app, close splash
   splashStep(SPLASH_STEPS.READY)
-  await new Promise(r => setTimeout(r, 350))  // let "Ready" render briefly
+  await new Promise(r => setTimeout(r, 350))
 
   controlWin.show()
   overlayWin.show()
@@ -309,7 +319,6 @@ app.whenReady().then(async () => {
 
   closeSplash()
 
-  // 6. Register global hotkey
   const ok = globalShortcut.register('CommandOrControl+Shift+M', async () => {
     log('HOTKEY','Ctrl+Shift+M triggered')
     await captureScreen()
