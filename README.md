@@ -26,7 +26,9 @@ npm run build:linux
 ```
 
 **macOS**: You'll be prompted for Screen Recording permission on first run.
+
 **Windows**: No special permissions needed.
+
 **Linux**: You'll be prompted for Screen Mirroring permission on each *new* run.
 
 ## OCR accuracy tips
