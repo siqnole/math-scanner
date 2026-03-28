@@ -1,7 +1,7 @@
 {
   "name": "math-scanner",
   "version": "0.6.0",
-  "description": "Math Scanner \u2014 it scans math",
+  "description": "Math Scanner — it scans math",
   "main": "electron/main.js",
   "author": {
     "name": "commu",
@@ -16,16 +16,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "mathjs": "^13.0.0",
+    "nerdamer": "^1.1.13",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tesseract.js": "^5.1.0",
-    "mathjs": "^13.0.0",
-    "nerdamer": "^1.1.13"
+    "tesseract.js": "^5.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^8.2.2",
-    "electron": "^31.0.0",
+    "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "vite": "^5.4.21",
     "wait-on": "^7.2.0"
@@ -33,7 +33,7 @@
   "build": {
     "appId": "com.mathscanner.app",
     "productName": "Math Scanner",
-    "copyright": "Copyright \u00a9 2026 Math Scanner",
+    "copyright": "Copyright © 2026 Math Scanner",
     "files": [
       "electron/**/*",
       "dist/**/*"
@@ -50,6 +50,7 @@
     ],
     "mac": {
       "target": "dmg",
+      "icon": "assets/icon.icns",
       "category": "public.app-category.education"
     },
     "win": {
@@ -61,6 +62,7 @@
           ]
         }
       ],
+      "icon": "assets/icon.ico",
       "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
@@ -75,6 +77,7 @@
         "AppImage",
         "deb"
       ],
+      "icon": "assets/icon.png",
       "category": "Education",
       "maintainer": "Math Support <wcommu@proton.me>"
     }

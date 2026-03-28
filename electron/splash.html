@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .window {
+    width: 100%; height: 100%;
+    background: #0a0a0a;
+    border: 1px solid #1e1e1e;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Ambient glow behind logo */
+  .glow {
+    position: absolute;
+    width: 220px; height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(79,70,229,0.18) 0%, transparent 70%);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -60%);
+    pointer-events: none;
+  }
+
+  .logo {
+    width: 56px; height: 56px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #7c5cf6, #3b82f6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    color: #fff;
+    box-shadow: 0 0 32px rgba(124,92,246,0.4);
+    margin-bottom: 18px;
+    position: relative;
+  }
+
+  .title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 12px;
+    color: #444;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 32px;
+  }
+
+  /* Progress track */
+  .track-wrap {
+    width: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+  }
+
+  .track {
+    width: 100%;
+    height: 3px;
+    background: #1a1a1a;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #7c5cf6, #3b82f6);
+    border-radius: 2px;
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 8px rgba(124,92,246,0.6);
+  }
+
+  .stage {
+    font-size: 11px;
+    color: #444;
+    font-family: monospace;
+    letter-spacing: 0.02em;
+    min-height: 16px;
+    transition: opacity 0.2s;
+  }
+
+  /* Step dots */
+  .steps {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #1e1e1e;
+    transition: background 0.3s, transform 0.3s;
+  }
+  .dot.done {
+    background: #4f46e5;
+    transform: scale(1.2);
+  }
+  .dot.active {
+    background: #7c5cf6;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1.2); }
+    50%       { opacity: 0.5; transform: scale(0.9); }
+  }
+
+  .version {
+    position: absolute;
+    bottom: 14px;
+    font-size: 10px;
+    color: #222;
+    font-family: monospace;
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="glow"></div>
+  <div class="logo">∑</div>
+  <div class="title">Math Scanner</div>
+  <div class="subtitle">Loading</div>
+
+  <div class="track-wrap">
+    <div class="track"><div class="bar" id="bar"></div></div>
+    <div class="stage" id="stage">Starting up…</div>
+    <div class="steps" id="steps"></div>
+  </div>
+
+  <div class="version" id="version">v0.6.0</div>
+</div>
+
+<script>
+  // Steps: label, target % width
+  const STEPS = [
+    { label: 'Launching app',     pct: 10 },
+    { label: 'Loading UI',        pct: 30 },
+    { label: 'Initialising OCR',  pct: 55 },
+    { label: 'Warming up engine', pct: 80 },
+    { label: 'Ready',             pct: 100 },
+  ]
+
+  const bar    = document.getElementById('bar')
+  const stage  = document.getElementById('stage')
+  const steps  = document.getElementById('steps')
+
+  // Build dots
+  STEPS.forEach((_, i) => {
+    const d = document.createElement('div')
+    d.className = 'dot'
+    d.id = `dot-${i}`
+    steps.appendChild(d)
+  })
+
+  function setProgress(stepIndex) {
+    const s = STEPS[stepIndex]
+    bar.style.width = s.pct + '%'
+    stage.textContent = s.label
+
+    STEPS.forEach((_, i) => {
+      const d = document.getElementById(`dot-${i}`)
+      if (i < stepIndex)       d.className = 'dot done'
+      else if (i === stepIndex) d.className = 'dot active'
+      else                      d.className = 'dot'
+    })
+  }
+
+  // IPC from main process
+  window.addEventListener('message', e => {
+    if (e.data?.type === 'step') setProgress(e.data.index)
+  })
+
+  // Expose for contextBridge (called via ipcRenderer → webContents.send)
+  window.setStep = setProgress
+
+  // Start at step 0
+  setProgress(0)
+</script>
+</body>
+</html>
