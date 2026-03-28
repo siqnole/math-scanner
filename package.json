@@ -1,0 +1,82 @@
+{
+  "name": "math-scanner",
+  "version": "0.6.0",
+  "description": "Math Scanner \u2014 it scans math",
+  "main": "electron/main.js",
+  "author": {
+    "name": "commu",
+    "email": "wcommu@proton.me"
+  },
+  "homepage": "https://mathscanner.app",
+  "scripts": {
+    "dev": "concurrently -n VITE,ELECTRON -c cyan,yellow \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",
+    "build": "vite build && electron-builder",
+    "build:win": "vite build && electron-builder --win",
+    "build:linux": "vite build && electron-builder --linux",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tesseract.js": "^5.1.0",
+    "mathjs": "^13.0.0",
+    "nerdamer": "^1.1.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.4.21",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.mathscanner.app",
+    "productName": "Math Scanner",
+    "copyright": "Copyright \u00a9 2026 Math Scanner",
+    "files": [
+      "electron/**/*",
+      "dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/tesseract.js-core/tesseract-core-simd-lstm.wasm",
+        "to": "tesseract-core-simd-lstm.wasm"
+      },
+      {
+        "from": "node_modules/tesseract.js/src/worker-script/node/index.js",
+        "to": "worker.js"
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Math Scanner"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Education",
+      "maintainer": "Math Support <wcommu@proton.me>"
+    }
+  }
+}

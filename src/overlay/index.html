@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Math Scanner — Overlay</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      /* CRITICAL: background must be transparent for the overlay to work */
+      html, body, #root {
+        background: transparent !important;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        pointer-events: none; /* belt-and-suspenders passthrough */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.jsx"></script>
+  </body>
+</html>
