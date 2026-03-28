@@ -1,5 +1,5 @@
 /**
- * ocr.js — Phase 6 with exhaustive word extraction and fallback
+ * ocr.js — Phase 6 with eng model, PSM 6, fallback bubble
  */
 'use strict'
 
@@ -15,7 +15,7 @@ function getNerdamer() {
   return _nerdamer
 }
 
-// ── OCR symbol normalisation (unchanged) ──────────────────────────────────────────────────
+// ── OCR symbol normalisation ──────────────────────────────────────────────────
 const FIXES = [
   [/[×]/g,'*'],[/÷/g,'/'],[/[—–−]/g,'-'],[/\u00b2/g,'^2'],[/\u00b3/g,'^3'],
   [/\u221a/g,'sqrt'],[/\u03c0/g,'pi'],[/O(?=\d)/g,'0'],[/\s*\^\s*/g,'^'],[/==/g,'='],
@@ -28,7 +28,7 @@ const FIXES = [
 ]
 function norm(s) { for (const [p,r] of FIXES) s=s.replace(p,r); return s.trim() }
 
-// ── Math patterns (unchanged) ─────────────────────────────────────────────────────────────
+// ── Math patterns ─────────────────────────────────────────────────────────────
 const PATTERNS = [
   { name:'arith',      re:/\d\s*[+\-\*\/]\s*\d/ },
   { name:'equation-x', re:/\d*\s*[xX]\s*[+\-\*\/\^]?[\s\d]*=\s*-?\d/ },
@@ -88,7 +88,7 @@ function solve(raw) {
   catch(e) { return { type:'error', answer:`err: ${e.message.slice(0,40)}` } }
 }
 
-// ── Word → line grouping (unchanged) ──────────────────────────────────────────────────────
+// ── Word → line grouping ──────────────────────────────────────────────────────
 function groupLines(words, yThr=14) {
   if (!words.length) return []
   const sorted=[...words].sort((a,b)=>a.bbox.y0-b.bbox.y0)
@@ -113,7 +113,7 @@ function linesToRaw(groupedLines) {
   })
 }
 
-// ── Vertical math detection (unchanged) ────────────────────────────────────────────────────
+// ── Vertical math detection ────────────────────────────────────────────────────
 const BARE_NUM  = /^\s*\d[\d,. ]*\s*$/
 const OP_NUM    = /^\s*([+\-×÷*\/])\s*(\d[\d,. ]*)\s*$/
 const SEPARATOR = /^[\-_=\s]{2,}$|^[_=]{1,}$/
@@ -163,15 +163,13 @@ function detectVerticalMath(rawLines) {
   return { assembled, usedIdx }
 }
 
-// ── Extract words from various Tesseract data structures ───────────────────────────────────
+// ── Extract words from various Tesseract data structures ───────────────────────
 function extractWordsFromData(data) {
-  // Try data.words first (if present)
   if (data.words && Array.isArray(data.words) && data.words.length > 0) {
     console.log('Using data.words, count:', data.words.length);
     return data.words;
   }
 
-  // Try data.layoutBlocks (common in newer tesseract.js)
   if (data.layoutBlocks && Array.isArray(data.layoutBlocks)) {
     console.log('Checking layoutBlocks');
     const words = [];
@@ -200,12 +198,10 @@ function extractWordsFromData(data) {
     }
   }
 
-  // Try data.blocks
   if (data.blocks && Array.isArray(data.blocks)) {
     console.log('Checking blocks');
     const words = [];
     for (const block of data.blocks) {
-      // Common structure: block.paragraphs
       if (block.paragraphs) {
         for (const para of block.paragraphs) {
           if (para.lines) {
@@ -223,7 +219,6 @@ function extractWordsFromData(data) {
           }
         }
       }
-      // Alternative: block.lines
       if (block.lines) {
         for (const line of block.lines) {
           if (line.words) {
@@ -244,12 +239,11 @@ function extractWordsFromData(data) {
     }
   }
 
-  // No words found
   console.log('No words found in any structure');
   return [];
 }
 
-// ── Main export with cancellation support and fallback ────────────────────────────────────
+// ── Main export ────────────────────────────────────────────────────────────────
 async function runOcr(dataURL, opts = {}) {
   const {
     confidenceThreshold = 20,
@@ -279,19 +273,17 @@ async function runOcr(dataURL, opts = {}) {
   }
 
   try {
+    // PSM 6 = uniform block of text (good for math)
     await worker.setParameters({
-      tessedit_pageseg_mode: '3',
+      tessedit_pageseg_mode: '6',
       preserve_interword_spaces: '1',
-      tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz +-*/=^()[].,_<>%!?:',
+      tessedit_char_whitelist: '0123456789+-*/=()',
     });
 
     const { data } = await worker.recognize(dataURL);
 
-    // Debug logs
-    console.log('data keys:', Object.keys(data));
     console.log('data.text length:', data.text?.length);
     if (data.text) console.log('data.text snippet:', data.text.slice(0, 200));
-    console.log('data.blocks type:', typeof data.blocks);
     console.log('data.blocks length:', data.blocks?.length);
     console.log('data.layoutBlocks length:', data.layoutBlocks?.length);
 
@@ -299,7 +291,7 @@ async function runOcr(dataURL, opts = {}) {
 
     if (signal?.aborted) throw new Error('OCR cancelled');
 
-    // Fallback: if no words and text exists, create a single bubble
+    // Fallback: if no words but text exists, create a single bubble
     if (allWords.length === 0 && data.text?.trim()) {
       console.log('No words, using fallback bubble from full text');
       const fullText = data.text.trim();
@@ -324,7 +316,6 @@ async function runOcr(dataURL, opts = {}) {
       return { bubbles: [], rawWords: [], rawLines: [], fullText: data.text ?? '' };
     }
 
-    // Normal processing with extracted words
     const filteredWords = allWords.filter(w => w.confidence >= confidenceThreshold);
     const allRawLines   = linesToRaw(groupLines(allWords));
 
@@ -332,7 +323,6 @@ async function runOcr(dataURL, opts = {}) {
     const filteredGrouped = groupLines(filteredWords);
     const bubbles = [];
 
-    // Vertical bubbles
     for (const vm of vertMath) {
       const result = solve(vm.expr);
       bubbles.push({
@@ -345,7 +335,6 @@ async function runOcr(dataURL, opts = {}) {
       });
     }
 
-    // Individual lines
     for (const lw of filteredGrouped) {
       if (bubbles.length >= maxBubbles) break;
 

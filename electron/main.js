@@ -149,7 +149,6 @@ async function captureScreen() {
   } finally { isCapturing=false }
 }
 
-// ── Updated OCR runner with scaling and cancellation ─────────────────────────
 async function runOcrOnRegion(croppedDataURL, cropRect) {
   // Cancel any ongoing OCR
   if (currentOcrController) {
@@ -157,31 +156,17 @@ async function runOcrOnRegion(croppedDataURL, cropRect) {
     currentOcrController = null;
   }
 
-  // Save cropped image for debugging
   const fs = require('fs');
   const base64Data = croppedDataURL.replace(/^data:image\/png;base64,/, '');
   const originalBuffer = Buffer.from(base64Data, 'base64');
 
-  // Scale up by factor 2 (increase text size)
-  const scaleFactor = 2;
-  const scaledBuffer = await sharp(originalBuffer)
-    .resize({
-      width: cropRect.w * scaleFactor,
-      height: cropRect.h * scaleFactor,
-      fit: 'fill',
-    })
-    .png()
-    .toBuffer();
+  // Save original for debugging (optional)
+  const tmpOrig = '/tmp/cropped_original.png';
+  fs.writeFileSync(tmpOrig, originalBuffer);
+  console.log('Saved original crop to', tmpOrig);
 
-  const scaledDataURL = `data:image/png;base64,${scaledBuffer.toString('base64')}`;
-
-  // Save both for debugging
-  const tmpPathOrig = '/tmp/cropped_original.png';
-  const tmpPathScaled = '/tmp/cropped_scaled.png';
-  fs.writeFileSync(tmpPathOrig, originalBuffer);
-  fs.writeFileSync(tmpPathScaled, scaledBuffer);
-  console.log('Saved original to', tmpPathOrig, 'scaled to', tmpPathScaled);
-  console.log('Scaled size (KB):', Math.round(scaledBuffer.length / 1024));
+  // Use the original crop (no scaling)
+  const dataURL = croppedDataURL;
 
   const controller = new AbortController();
   currentOcrController = controller;
@@ -191,7 +176,7 @@ async function runOcrOnRegion(croppedDataURL, cropRect) {
   sendToOverlay('scan-start', cropRect);
 
   try {
-    const { bubbles, rawWords, rawLines, fullText } = await runOcr(scaledDataURL, {
+    const { bubbles, rawWords, rawLines, fullText } = await runOcr(dataURL, {
       confidenceThreshold: 20,
       maxBubbles: 60,
       cropOffset: { x: cropRect.x, y: cropRect.y },

@@ -116,8 +116,7 @@ function SelectionCanvas({ onSelected, onCancel }) {
     dragging.current = false;
     const r = currentRect.current;
     if (!r || r.w < 10 || r.h < 10) { onCancel(); return; }
-    // Add margin
-    const margin = 10;
+    const margin = 30;   // increased from 10
     const expanded = {
       x: Math.max(0, Math.round(r.x) - margin),
       y: Math.max(0, Math.round(r.y) - margin),
