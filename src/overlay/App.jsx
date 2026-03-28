@@ -112,14 +112,19 @@ function SelectionCanvas({ onSelected, onCancel }) {
   }
 
   function onMouseUp(e) {
-    if (!dragging.current) return
-    dragging.current = false
-    const r = currentRect.current
-    if (!r || r.w < 10 || r.h < 10) { onCancel(); return }
-    onSelected({
-      x: Math.round(r.x), y: Math.round(r.y),
-      w: Math.round(r.w), h: Math.round(r.h),
-    })
+    if (!dragging.current) return;
+    dragging.current = false;
+    const r = currentRect.current;
+    if (!r || r.w < 10 || r.h < 10) { onCancel(); return; }
+    // Add margin
+    const margin = 10;
+    const expanded = {
+      x: Math.max(0, Math.round(r.x) - margin),
+      y: Math.max(0, Math.round(r.y) - margin),
+      w: Math.round(r.w) + 2 * margin,
+      h: Math.round(r.h) + 2 * margin,
+    };
+    onSelected(expanded);
   }
 
   return (

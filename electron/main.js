@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, screen, desktopCapturer } = require('electron')
 const path = require('path')
+const sharp = require('sharp'); 
 const IS_DEV = process.argv.includes('--dev')
 const { runOcr } = require('./ocr')
 
@@ -148,13 +149,39 @@ async function captureScreen() {
   } finally { isCapturing=false }
 }
 
-// ── Updated OCR runner with cancellation ──────────────────────────────────────
+// ── Updated OCR runner with scaling and cancellation ─────────────────────────
 async function runOcrOnRegion(croppedDataURL, cropRect) {
   // Cancel any ongoing OCR
   if (currentOcrController) {
     currentOcrController.abort();
     currentOcrController = null;
   }
+
+  // Save cropped image for debugging
+  const fs = require('fs');
+  const base64Data = croppedDataURL.replace(/^data:image\/png;base64,/, '');
+  const originalBuffer = Buffer.from(base64Data, 'base64');
+
+  // Scale up by factor 2 (increase text size)
+  const scaleFactor = 2;
+  const scaledBuffer = await sharp(originalBuffer)
+    .resize({
+      width: cropRect.w * scaleFactor,
+      height: cropRect.h * scaleFactor,
+      fit: 'fill',
+    })
+    .png()
+    .toBuffer();
+
+  const scaledDataURL = `data:image/png;base64,${scaledBuffer.toString('base64')}`;
+
+  // Save both for debugging
+  const tmpPathOrig = '/tmp/cropped_original.png';
+  const tmpPathScaled = '/tmp/cropped_scaled.png';
+  fs.writeFileSync(tmpPathOrig, originalBuffer);
+  fs.writeFileSync(tmpPathScaled, scaledBuffer);
+  console.log('Saved original to', tmpPathOrig, 'scaled to', tmpPathScaled);
+  console.log('Scaled size (KB):', Math.round(scaledBuffer.length / 1024));
 
   const controller = new AbortController();
   currentOcrController = controller;
@@ -164,8 +191,8 @@ async function runOcrOnRegion(croppedDataURL, cropRect) {
   sendToOverlay('scan-start', cropRect);
 
   try {
-    const { bubbles, rawWords, rawLines, fullText } = await runOcr(croppedDataURL, {
-      confidenceThreshold: 40,
+    const { bubbles, rawWords, rawLines, fullText } = await runOcr(scaledDataURL, {
+      confidenceThreshold: 20,
       maxBubbles: 60,
       cropOffset: { x: cropRect.x, y: cropRect.y },
       onProgress: pct => {
@@ -175,7 +202,6 @@ async function runOcrOnRegion(croppedDataURL, cropRect) {
       signal: controller.signal,
     });
 
-    // If aborted, ignore results
     if (controller.signal.aborted) return;
 
     log('OCR', 'Done', { bubbles: bubbles.length, words: rawWords.length, lines: rawLines.length });

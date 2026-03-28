@@ -1,7 +1,7 @@
 {
   "name": "math-scanner",
-  "version": "0.6.0",
-  "description": "Math Scanner — it scans math",
+  "version": "0.7.0",
+  "description": "it scans math",
   "main": "electron/main.js",
   "author": {
     "name": "commu",
@@ -20,6 +20,7 @@
     "nerdamer": "^1.1.13",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sharp": "^0.34.5",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {

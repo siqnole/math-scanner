@@ -1,11 +1,10 @@
 /**
- * ocr.js — Phase 6 with cancellation support
+ * ocr.js — Phase 6 with exhaustive word extraction and fallback
  */
 'use strict'
 
 let _math     = null
 let _nerdamer = null
-let _tesseract = null
 
 function getMath()     { if (!_math)    _math    = require('mathjs');    return _math }
 function getNerdamer() {
@@ -14,10 +13,6 @@ function getNerdamer() {
     require('nerdamer/Algebra'); require('nerdamer/Calculus'); require('nerdamer/Solve')
   }
   return _nerdamer
-}
-function getTesseract() {
-  if (!_tesseract) _tesseract = require('tesseract.js')
-  return _tesseract
 }
 
 // ── OCR symbol normalisation (unchanged) ──────────────────────────────────────────────────
@@ -168,31 +163,113 @@ function detectVerticalMath(rawLines) {
   return { assembled, usedIdx }
 }
 
-// ── Main export with cancellation support ─────────────────────────────────────────────────
+// ── Extract words from various Tesseract data structures ───────────────────────────────────
+function extractWordsFromData(data) {
+  // Try data.words first (if present)
+  if (data.words && Array.isArray(data.words) && data.words.length > 0) {
+    console.log('Using data.words, count:', data.words.length);
+    return data.words;
+  }
+
+  // Try data.layoutBlocks (common in newer tesseract.js)
+  if (data.layoutBlocks && Array.isArray(data.layoutBlocks)) {
+    console.log('Checking layoutBlocks');
+    const words = [];
+    for (const block of data.layoutBlocks) {
+      if (block.paragraphs) {
+        for (const para of block.paragraphs) {
+          if (para.lines) {
+            for (const line of para.lines) {
+              if (line.words) {
+                for (const word of line.words) {
+                  words.push({
+                    text: word.text,
+                    confidence: word.confidence,
+                    bbox: word.bbox,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    if (words.length) {
+      console.log('Extracted from layoutBlocks, count:', words.length);
+      return words;
+    }
+  }
+
+  // Try data.blocks
+  if (data.blocks && Array.isArray(data.blocks)) {
+    console.log('Checking blocks');
+    const words = [];
+    for (const block of data.blocks) {
+      // Common structure: block.paragraphs
+      if (block.paragraphs) {
+        for (const para of block.paragraphs) {
+          if (para.lines) {
+            for (const line of para.lines) {
+              if (line.words) {
+                for (const word of line.words) {
+                  words.push({
+                    text: word.text,
+                    confidence: word.confidence,
+                    bbox: word.bbox,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+      // Alternative: block.lines
+      if (block.lines) {
+        for (const line of block.lines) {
+          if (line.words) {
+            for (const word of line.words) {
+              words.push({
+                text: word.text,
+                confidence: word.confidence,
+                bbox: word.bbox,
+              });
+            }
+          }
+        }
+      }
+    }
+    if (words.length) {
+      console.log('Extracted from blocks, count:', words.length);
+      return words;
+    }
+  }
+
+  // No words found
+  console.log('No words found in any structure');
+  return [];
+}
+
+// ── Main export with cancellation support and fallback ────────────────────────────────────
 async function runOcr(dataURL, opts = {}) {
   const {
-    confidenceThreshold = 55,
+    confidenceThreshold = 20,
     maxBubbles = 60,
     cropOffset = { x: 0, y: 0 },
     onProgress = () => {},
-    signal,                     // new: AbortSignal for cancellation
+    signal,
   } = opts;
 
-  const { createWorker } = getTesseract();
+  const { createWorker } = require('tesseract.js');
 
-  // Create worker
   const worker = await createWorker('eng', 1, {
-    logger: m => { if (m.status === 'recognizing text') onProgress(Math.round(m.progress * 100)); },
-    errorHandler: () => {},
+    langPath: process.cwd(),
   });
 
-  // If already aborted, clean up and bail
   if (signal?.aborted) {
     await worker.terminate();
     throw new Error('OCR cancelled');
   }
 
-  // Set up abort listener
   let abortHandler = null;
   if (signal) {
     abortHandler = () => {
@@ -202,23 +279,60 @@ async function runOcr(dataURL, opts = {}) {
   }
 
   try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: '3',
+      preserve_interword_spaces: '1',
+      tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz +-*/=^()[].,_<>%!?:',
+    });
+
     const { data } = await worker.recognize(dataURL);
 
-    // After recognition, check if cancelled
+    // Debug logs
+    console.log('data keys:', Object.keys(data));
+    console.log('data.text length:', data.text?.length);
+    if (data.text) console.log('data.text snippet:', data.text.slice(0, 200));
+    console.log('data.blocks type:', typeof data.blocks);
+    console.log('data.blocks length:', data.blocks?.length);
+    console.log('data.layoutBlocks length:', data.layoutBlocks?.length);
+
+    let allWords = extractWordsFromData(data);
+
     if (signal?.aborted) throw new Error('OCR cancelled');
 
-    const allWords      = data.words || [];
+    // Fallback: if no words and text exists, create a single bubble
+    if (allWords.length === 0 && data.text?.trim()) {
+      console.log('No words, using fallback bubble from full text');
+      const fullText = data.text.trim();
+      const result = solve(fullText);
+      const dummyBubble = {
+        id: `fallback-${Date.now()}`,
+        x: cropOffset.x + 8,
+        y: cropOffset.y + 8,
+        equation: fullText,
+        answer: result.answer,
+        type: result.type,
+      };
+      return {
+        bubbles: [dummyBubble],
+        rawWords: [],
+        rawLines: [],
+        fullText,
+      };
+    }
+
+    if (allWords.length === 0) {
+      return { bubbles: [], rawWords: [], rawLines: [], fullText: data.text ?? '' };
+    }
+
+    // Normal processing with extracted words
     const filteredWords = allWords.filter(w => w.confidence >= confidenceThreshold);
     const allRawLines   = linesToRaw(groupLines(allWords));
 
-    // Vertical math
     const { assembled: vertMath, usedIdx: vertUsedIdx } = detectVerticalMath(allRawLines);
-
-    // Normal per-line processing
     const filteredGrouped = groupLines(filteredWords);
     const bubbles = [];
 
-    // Vertical bubbles first
+    // Vertical bubbles
     for (const vm of vertMath) {
       const result = solve(vm.expr);
       bubbles.push({
@@ -240,12 +354,10 @@ async function runOcr(dataURL, opts = {}) {
       const x0     = Math.min(...lw.map(w=>w.bbox.x0));
       const y0     = Math.min(...lw.map(w=>w.bbox.y0));
       const x1     = Math.max(...lw.map(w=>w.bbox.x1));
-      const avgC   = Math.round(lw.reduce((s,w)=>s+w.confidence,0)/lw.length);
 
       const absorbedByVertical = allRawLines.some(
         (al, idx) => vertUsedIdx.has(idx) && Math.abs(al.y0 - y0) < 8
       );
-
       const isLoneNumber = BARE_NUM.test(normed);
 
       if (absorbedByVertical || isLoneNumber) continue;
@@ -271,12 +383,10 @@ async function runOcr(dataURL, opts = {}) {
       fullText: data.text ?? '',
     };
   } catch (err) {
-    // If cancellation was requested, rethrow a specific error
     if (signal?.aborted) throw new Error('OCR cancelled');
     throw err;
   } finally {
     if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
-    // Ensure worker is terminated (if not already)
     try { await worker.terminate(); } catch {}
   }
 }
