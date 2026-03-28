@@ -10,13 +10,24 @@
 
 ## Setup
 
+*Use `npm run` for help!*
+
 ```bash
 npm install
 npm run dev
 ```
 
+### Building
+```bash
+npm install 
+npm run build
+npm run build:win
+npm run build:linux
+```
+
 **macOS**: You'll be prompted for Screen Recording permission on first run.
 **Windows**: No special permissions needed.
+**Linux**: You'll be prompted for Screen Mirroring permission on each *new* run.
 
 ## OCR accuracy tips
 
@@ -34,17 +45,4 @@ npm run dev
   semantic understanding.
 - Superscripts (`x²`) often OCR as `x 2` — the normaliser converts `^2`
   patterns but not all combinations.
-
-## File structure
-
-```
-electron/
-  main.js        — Electron main process; orchestrates capture + OCR
-  ocr.js         — Tesseract pipeline, math detection, solvers  ← NEW
-  preload.js     — IPC bridge (adds onOcrResults)               ← updated
-src/
-  control/
-    App.jsx      — Control UI with OCR results table            ← updated
-  overlay/
-    App.jsx      — Bubble overlay (unchanged from Phase 2)
-```
+ overlay (unchanged from Phase 2)
