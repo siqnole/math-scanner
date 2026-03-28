@@ -16,6 +16,7 @@
 npm install
 npm run dev
 ```
+(then in another terminal run `npx electron . --dev` (or just `npx electron .`) to open the program)
 
 ### Building
 ```bash
@@ -29,7 +30,7 @@ npm run build:linux
 
 **Windows**: No special permissions needed.
 
-**Linux**: You'll be prompted for Screen Mirroring permission on each *new* run.
+**Linux**: You'll be prompted to Share Screen on each *new* run / draw.
 
 ## OCR accuracy tips
 
@@ -47,4 +48,4 @@ npm run build:linux
   semantic understanding.
 - Superscripts (`x²`) often OCR as `x 2` — the normaliser converts `^2`
   patterns but not all combinations.
- overlay (unchanged from Phase 2)
+ overlay
